@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,8 +20,16 @@ func printUsage() {
 }
 
 //функция обрабатывает ссылки из файла и отправляет запросы, результат записывает в отдельный созданный файл
+func prUrl(url *url.URL, outputFileName string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	err := processURL(url, outputFileName, wg)
+	if err != nil {
+		fmt.Println("Error", err)
+		return
+	}
 
-func processURL(url *url.URL, outputFileName string) error {
+}
+func processURL(url *url.URL, outputFileName string, wg *sync.WaitGroup) error {
 	// Проверяем, существует ли уже файл с таким именем
 	if _, err := os.Stat(outputFileName); err == nil {
 		fmt.Println("Файл для", url.Host, "уже существует")
@@ -58,6 +67,7 @@ func createOutputFileName(url *url.URL, dstPtr string) {
 }
 
 func main() {
+	var wg sync.WaitGroup
 	start := time.Now()                             //счетчик выполнения программы
 	fileName := flag.String("src", "", "Имя файла") //объявляем флаги
 	dstPtr := flag.String("dst", "", "Название конечной директории")
@@ -107,16 +117,13 @@ func main() {
 	for _, line := range lines {
 		u, err := url.Parse(line)
 		if err == nil && u.Scheme != "" && u.Host != "" {
-			err = processURL(u, *dstPtr)
-			if err != nil {
-				fmt.Println("Ошибка обработки ссылки:", err)
-				continue
-			}
+			wg.Add(1)
+			go prUrl(u, *dstPtr, &wg)
 			createOutputFileName(u, *dstPtr)
-
 		}
 	}
 
 	elapsed := time.Since(start) //остановка счётчика и вывод
+	wg.Wait()
 	fmt.Printf("Время выполнения программы: %s\n", elapsed)
 }
