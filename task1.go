@@ -11,48 +11,50 @@ import (
 	"time"
 )
 
-// функция, flag.usage вызывает функцию PrintDefaults, которая выводит список опций -h, -help для помощи вывода в консоль
-func init() {
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
-		fmt.Fprintf(flag.CommandLine.Output(), "  %s -src <source_file> -dst <destination_directory>\n", os.Args[0])
-		flag.PrintDefaults()
-	}
+// функция, printUsage вызывает функцию PrintDefaults, которая выводит список опций -h, -help для помощи вывода в консоль
+func printUsage() {
+	fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
+	fmt.Fprintf(flag.CommandLine.Output(), "  %s -src <source_file> -dst <destination_directory>\n", os.Args[0])
+	flag.PrintDefaults()
 }
 
 //функция обрабатывает ссылки из файла и отправляет запросы, результат записывает в отдельный созданный файл
-func processURL(url *url.URL, dstPtr string) {
-	outputFileName := dstPtr + "/" + url.Host + ".txt"
 
+func processURL(url *url.URL, outputFileName string) error {
 	// Проверяем, существует ли уже файл с таким именем
 	if _, err := os.Stat(outputFileName); err == nil {
 		fmt.Println("Файл для", url.Host, "уже существует")
-		return
+		return err
 	}
 
 	resp, err := http.Get(url.String())
 	if err != nil {
 		fmt.Println(url, ":", err)
-		return
+		return err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println(url, ":", err)
-		return
+		return err
 	}
 
 	outputFile, err := os.Create(outputFileName)
 	if err != nil {
 		fmt.Println(url, ":", err)
-		return
+		return err
 	}
 	defer outputFile.Close()
 
 	outputFile.Write(body)
 
 	fmt.Println(url, ":", "Результат сохранен в файл", outputFileName)
+	return nil
+}
+
+func createOutputFileName(url *url.URL, dstPtr string) {
+	fmt.Sprintf("%s/%s.txt", dstPtr, url.Host)
 }
 
 func main() {
@@ -63,11 +65,13 @@ func main() {
 
 	if *fileName == "" {
 		fmt.Println("Необходимо указать имя файла")
+		printUsage()
 		return
 	}
 
 	if *dstPtr == "" {
 		fmt.Println("Необходимо указать название конечной директории")
+		printUsage()
 		return
 	}
 
@@ -77,13 +81,25 @@ func main() {
 		return
 	}
 
-	err = os.MkdirAll(*dstPtr, 0777) //создание директории
-	if err != nil {
-		fmt.Println("Ошибка создания директории:", err)
+	if _, err := os.Stat(*dstPtr); err == nil {
+		if fileInfo, _ := os.Stat(*dstPtr); fileInfo.IsDir() {
+			fmt.Println("Директория", *dstPtr, "уже создана")
+		} else {
+			fmt.Println(*dstPtr, "не является директорией")
+			return
+		}
+	} else if os.IsNotExist(err) {
+		fmt.Println("Директория", *dstPtr, "не существует. Создаем...")
+		err = os.MkdirAll(*dstPtr, 0777)
+		if err != nil {
+			fmt.Println("Ошибка создания директории:", err)
+			return
+		}
+		fmt.Println("Директория", *dstPtr, "успешно создана")
+	} else {
+		fmt.Println("Ошибка при проверке директории:", err)
 		return
 	}
-
-	fmt.Println("Директория", *dstPtr, "успешно создана")
 
 	content := string(file)
 	lines := strings.Split(content, "\n")
@@ -91,7 +107,13 @@ func main() {
 	for _, line := range lines {
 		u, err := url.Parse(line)
 		if err == nil && u.Scheme != "" && u.Host != "" {
-			processURL(u, *dstPtr)
+			err = processURL(u, *dstPtr)
+			if err != nil {
+				fmt.Println("Ошибка обработки ссылки:", err)
+				continue
+			}
+			createOutputFileName(u, *dstPtr)
+
 		}
 	}
 
