@@ -20,34 +20,30 @@ func printUsage() {
 }
 
 //функция обрабатывает ссылки из файла и отправляет запросы, результат записывает в отдельный созданный файл
-func prUrl(url *url.URL, outputFileName string, wg *sync.WaitGroup) {
-	defer wg.Done()
-	err := processURL(url, outputFileName, wg)
-	if err != nil {
-		fmt.Println("Error", err)
-		return
-	}
 
-}
-func processURL(url *url.URL, outputFileName string, wg *sync.WaitGroup) error {
+func processURL(url *url.URL, outputFileName string, wg *sync.WaitGroup) (string, error) {
 	// Проверяем, существует ли уже файл с таким именем
 	if _, err := os.Stat(outputFileName); err == nil {
 		fmt.Println("Файл для", url.Host, "уже существует")
-		return err
+		return "", err
 	}
 
 	resp, err := http.Get(url.String())
 	if err != nil {
 		fmt.Println(url, ":", err)
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println(url, ":", err)
-		return err
+		return "", err
 	}
+
+	return string(body), nil
+}
+func processWrite(url *url.URL, outputFileName string, wg *sync.WaitGroup, body string) error {
 
 	outputFile, err := os.Create(outputFileName)
 	if err != nil {
@@ -56,16 +52,19 @@ func processURL(url *url.URL, outputFileName string, wg *sync.WaitGroup) error {
 	}
 	defer outputFile.Close()
 
-	outputFile.Write(body)
+	_, err = outputFile.WriteString(body)
+	if err != nil {
+		fmt.Println(url, ":", err)
+		return err
+	}
 
 	fmt.Println(url, ":", "Результат сохранен в файл", outputFileName)
 	return nil
 }
 
-func createOutputFileName(url *url.URL, dstPtr string) {
-	fmt.Sprintf("%s/%s.txt", dstPtr, url.Host)
+func createOutputFileName(u *url.URL, dst string) string {
+	return fmt.Sprintf("%s/%s.txt", dst, u.Host)
 }
-
 func main() {
 	var wg sync.WaitGroup
 	start := time.Now()                             //счетчик выполнения программы
@@ -118,8 +117,22 @@ func main() {
 		u, err := url.Parse(line)
 		if err == nil && u.Scheme != "" && u.Host != "" {
 			wg.Add(1)
-			go prUrl(u, *dstPtr, &wg)
-			createOutputFileName(u, *dstPtr)
+			outputFileName := createOutputFileName(u, *dstPtr) // Получаем имя файла
+			go func(url *url.URL, outputFileName string, wg *sync.WaitGroup) {
+				defer wg.Done()
+
+				body, err := processURL(url, outputFileName, wg)
+				if err != nil {
+					fmt.Println("Error", err)
+					return
+				}
+
+				err = processWrite(url, outputFileName, wg, body)
+				if err != nil {
+					fmt.Println("Error", err)
+					return
+				}
+			}(u, outputFileName, &wg)
 		}
 	}
 
